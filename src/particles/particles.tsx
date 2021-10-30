@@ -16,21 +16,42 @@ function Particles() {
     camera.position.z = 5;
 
     // create the particle variables
-    const vertices = [];
+    const particles: number[] = [];
+    const dParticles: number[] = [];
+    const particleColors: number[] = [];
+    const color = new THREE.Color();
 
-    for ( let i = 0; i < 100000; i ++ ) {
+    const particleCount = 100000;
 
-        const x = THREE.MathUtils.randFloatSpread( 2000 );
-        const y = THREE.MathUtils.randFloatSpread( 2000 );
-        const z = THREE.MathUtils.randFloatSpread( 2000 );
+    for ( let i = 0; i < particleCount; i ++ ) {
 
-        vertices.push( x, y, z );
+      const perc = i / particleCount;
+
+      // const x = THREE.MathUtils.randFloatSpread( 2000 );
+      // const y = THREE.MathUtils.randFloatSpread( 2000 );
+      // const z = THREE.MathUtils.randFloatSpread( 2000 );
+      const x = 0;
+      const y = 0;
+      const z = -500;
+
+      particles.push( x, y, z );
+
+      const dx = THREE.MathUtils.randFloatSpread( perc + 0.5 );
+      const dy = THREE.MathUtils.randFloatSpread( perc + 0.5);
+      const dz = THREE.MathUtils.randFloatSpread( perc + 0.5);
+
+      dParticles.push( dx, dy, dz );
+
+      color.setHSL(perc, 1.0, 0.5);
+      particleColors.push(color.r, color.g, color.b);
     }
 
     const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute( 'position', new THREE.Float32BufferAttribute( vertices, 3 ) );
+    geometry.setAttribute( 'position', new THREE.Float32BufferAttribute( particles, 3 ) );
+    geometry.setAttribute( 'color', new THREE.Float32BufferAttribute(particleColors, 3));
 
-    const material = new THREE.PointsMaterial( { color: 0x888888 } );
+    const material = new THREE.PointsMaterial( { size: 1, vertexColors: true } );
+    //const material = new THREE.PointsMaterial( { color: 0xD08010, size: 1 } );
 
     const points = new THREE.Points( geometry, material );
 
@@ -44,6 +65,12 @@ function Particles() {
         return;
       }
       requestAnimationFrame( animate );
+
+      const particleCount = particles.length;
+      for (let i = 0; i < particleCount; i += 1) {
+        particles[i] += dParticles[i];
+      }
+      geometry.setAttribute( 'position', new THREE.Float32BufferAttribute( particles, 3 ) );
       renderer.render( scene, camera );
     };
 
