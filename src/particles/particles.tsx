@@ -13,7 +13,7 @@ function Particles() {
     const renderer = new THREE.WebGLRenderer();
     renderer.setSize( window.innerWidth, window.innerHeight );
     currentNode?.appendChild(renderer.domElement);
-    camera.position.z = 5;
+    camera.position.z = 500;
 
     // create the particle variables
     const particles: number[] = [];
@@ -34,7 +34,7 @@ function Particles() {
       // const z = THREE.MathUtils.randFloatSpread( 2000 );
       const x = 0;
       const y = 0;
-      const z = -500;
+      const z = 0;
 
       particles.push( x, y, z );
 
@@ -66,6 +66,7 @@ function Particles() {
     // Animate
     let stopAnimation = false;
 
+    const bound = 500;
     const animate = () => {
       if (stopAnimation) {
         return;
@@ -73,6 +74,13 @@ function Particles() {
       requestAnimationFrame( animate );
 
       const particleCount = particles.length;
+      for (let i = 0; i < particleCount; i += 1) {
+        if (particles[i] > bound && dParticles[i] > 0) {
+          dParticles[i] = -dParticles[i];
+        } else if (particles[i] < -bound && dParticles[i] < 0) {
+          dParticles[i] = -dParticles[i];
+        }
+      }
       for (let i = 0; i < particleCount; i += 1) {
         particles[i] += dParticles[i];
       }
