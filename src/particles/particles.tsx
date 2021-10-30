@@ -20,6 +20,8 @@ function Particles() {
     const dParticles: number[] = [];
     const particleColors: number[] = [];
     const color = new THREE.Color();
+    const zAxis = new THREE.Vector3(0, 0, 1);
+    const xAxis = new THREE.Vector3(1, 0, 0);
 
     const particleCount = 100000;
 
@@ -36,11 +38,15 @@ function Particles() {
 
       particles.push( x, y, z );
 
-      const dx = THREE.MathUtils.randFloatSpread( perc + 0.5 );
-      const dy = THREE.MathUtils.randFloatSpread( perc + 0.5);
-      const dz = THREE.MathUtils.randFloatSpread( perc + 0.5);
+      //const dp = new THREE.Vector3(perc, 0, 0);
+      const dp = new THREE.Vector3((perc * 3 | 0) / 3 + .1, 0, 0);
 
-      dParticles.push( dx, dy, dz );
+      // dp.applyAxisAngle(zAxis, perc * Math.PI * 40);
+      // dp.applyAxisAngle(xAxis, perc * Math.PI * 2);
+      dp.applyAxisAngle(zAxis, THREE.MathUtils.randFloatSpread(Math.PI * 2));
+      dp.applyAxisAngle(xAxis, THREE.MathUtils.randFloatSpread(Math.PI * 2));
+
+      dParticles.push(dp.x, dp.y, dp.z);
 
       color.setHSL(perc, 1.0, 0.5);
       particleColors.push(color.r, color.g, color.b);
