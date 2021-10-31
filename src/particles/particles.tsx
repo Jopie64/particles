@@ -60,7 +60,6 @@ function Particles() {
       const geometry = new THREE.SphereGeometry(1, 32, 32);
       const material = new THREE.MeshBasicMaterial( { color: 0xffffff } );
       const mesh = new THREE.Mesh( geometry, material );
-      mesh.position.set(0, 0, 0);
       mesh.material.color.setRGB(1,1,1);
       return {
         geometry,
@@ -85,6 +84,8 @@ function Particles() {
 
       const particleCount = particles.length;
 
+      const resistance = Math.pow(.9999, timeDiff);
+
       if (mePos) {
         const particlePos = new THREE.Vector3();
         const particleDist = new THREE.Vector3();
@@ -102,6 +103,7 @@ function Particles() {
             .normalize()
             .multiplyScalar(strength);
           particleSpeed.add(force);
+          particleSpeed.multiplyScalar(resistance);
           dParticles[i]     = particleSpeed.x;
           dParticles[i + 1] = particleSpeed.y;
           dParticles[i + 2] = particleSpeed.z;
