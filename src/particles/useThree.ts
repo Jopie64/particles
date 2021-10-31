@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 
 type ThreeScene = {
@@ -7,7 +7,7 @@ type ThreeScene = {
   renderer: THREE.WebGLRenderer;
 }
 
-type Animate = () => void;
+type Animate = (timeDiff: number) => void;
 type InitThree = (scene: ThreeScene) => Animate;
 
 export function useThreeScene(init: InitThree): React.MutableRefObject<HTMLDivElement | null> {
@@ -27,17 +27,22 @@ export function useThreeScene(init: InitThree): React.MutableRefObject<HTMLDivEl
 
     // Animate
     let stopAnimation = false;
+    let prevTime: number;
 
-    const innerAnimate = () => {
+    const innerAnimate = (timeStamp: number) => {
       if (stopAnimation) {
         return;
       }
+      if (prevTime === undefined) {
+        prevTime = timeStamp;
+      }
       requestAnimationFrame( innerAnimate );
-      animate();
+      animate(timeStamp - prevTime);
       renderer.render( scene, camera );
+      prevTime = timeStamp;
     };
 
-    innerAnimate();
+    requestAnimationFrame( innerAnimate );
     return () => {
       stopAnimation = true;
       currentNode?.removeChild(renderer.domElement);

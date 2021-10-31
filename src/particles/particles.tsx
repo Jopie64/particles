@@ -14,6 +14,7 @@ function Particles() {
     const xAxis = new THREE.Vector3(1, 0, 0);
 
     const particleCount = 100000;
+    const speed = .1;
 
     for ( let i = 0; i < particleCount; i ++ ) {
 
@@ -28,8 +29,8 @@ function Particles() {
 
       particles.push( x, y, z );
 
-      //const dp = new THREE.Vector3(perc, 0, 0);
-      const dp = new THREE.Vector3((perc * 3 | 0) / 3 + .1, 0, 0);
+      //const dp = new THREE.Vector3(perc * speed, 0, 0);
+      const dp = new THREE.Vector3(((perc * 3 | 0) / 3 + .1) * speed, 0, 0);
 
       // dp.applyAxisAngle(zAxis, perc * Math.PI * 40);
       // dp.applyAxisAngle(xAxis, perc * Math.PI * 2);
@@ -75,7 +76,7 @@ function Particles() {
 
     // Animate
     const bound = 500;
-    return () => {
+    return timeDiff => {
       const particleCount = particles.length;
       for (let i = 0; i < particleCount; i += 1) {
         if (particles[i] > bound && dParticles[i] > 0) {
@@ -85,7 +86,7 @@ function Particles() {
         }
       }
       for (let i = 0; i < particleCount; i += 1) {
-        particles[i] += dParticles[i];
+        particles[i] += dParticles[i] * timeDiff;
       }
       geometry.setAttribute( 'position', new THREE.Float32BufferAttribute( particles, 3 ) );
     };
