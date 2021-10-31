@@ -1,20 +1,10 @@
-import React, { useEffect, useRef } from 'react';
+import React from 'react';
 import * as THREE from 'three';
+import { useThreeScene } from './useThree';
 
 function Particles() {
 
-  const node = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    // Init three
-    const currentNode = node.current;
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera( 75, window.innerWidth/window.innerHeight, 0.1, 1000 );
-    const renderer = new THREE.WebGLRenderer();
-    renderer.setSize( window.innerWidth, window.innerHeight );
-    currentNode?.appendChild(renderer.domElement);
-    camera.position.z = 500;
-
+  const node = useThreeScene(({scene}) => {
     // create the particle variables
     const particles: number[] = [];
     const dParticles: number[] = [];
@@ -63,16 +53,29 @@ function Particles() {
 
     scene.add( points );
 
+
+    // Me
+    const me = (() => {
+      const geometry = new THREE.SphereGeometry(5, 32, 32);
+      const material = new THREE.MeshBasicMaterial( { color: 0xffffff } );
+      const mesh = new THREE.Mesh( geometry, material );
+      mesh.position.set(0, 0, 0);
+      mesh.material.color.setRGB(1,1,1);
+      return {
+        geometry,
+        material,
+        mesh
+      };
+    })();
+
+    scene.add(me.mesh);
+
+    // See for mouse position:
+    // https://gist.github.com/whoisryosuke/99f23c9957d90e8cc3eb7689ffa5757c
+
     // Animate
-    let stopAnimation = false;
-
     const bound = 500;
-    const animate = () => {
-      if (stopAnimation) {
-        return;
-      }
-      requestAnimationFrame( animate );
-
+    return () => {
       const particleCount = particles.length;
       for (let i = 0; i < particleCount; i += 1) {
         if (particles[i] > bound && dParticles[i] > 0) {
@@ -85,13 +88,6 @@ function Particles() {
         particles[i] += dParticles[i];
       }
       geometry.setAttribute( 'position', new THREE.Float32BufferAttribute( particles, 3 ) );
-      renderer.render( scene, camera );
-    };
-
-    animate();
-    return () => {
-      stopAnimation = true;
-      currentNode?.removeChild(renderer.domElement);
     };
   });
 
