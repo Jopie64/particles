@@ -1,8 +1,12 @@
 import React from 'react';
 import * as THREE from 'three';
+import { useKeyEvent } from '../utils/useEvent';
 import { useThreeScene } from '../utils/useThree';
 
 function Particles() {
+
+  const addKeyHandler = useKeyEvent();
+
 
   const node = useThreeScene(({ scene, mouseRay }) => {
     // create the particle variables
@@ -13,7 +17,7 @@ function Particles() {
     const zAxis = new THREE.Vector3(0, 0, 1);
     const xAxis = new THREE.Vector3(1, 0, 0);
 
-    const particleCount = 1000;
+    const particleCount = 100000;
     const speed = 0.1;
 
     for ( let i = 0; i < particleCount; i ++ ) {
@@ -54,7 +58,6 @@ function Particles() {
 
     scene.add( points );
 
-
     // Me
     const me = (() => {
       const geometry = new THREE.SphereGeometry(1, 32, 32);
@@ -70,8 +73,9 @@ function Particles() {
 
     scene.add(me.mesh);
 
-    // See for mouse position:
-    // https://gist.github.com/whoisryosuke/99f23c9957d90e8cc3eb7689ffa5757c
+    // Keyboard handling
+    let push = true;
+    addKeyHandler(' ', _ => push = !push);
 
     const mousePlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
 
@@ -102,7 +106,11 @@ function Particles() {
           const force = particleDist
             .normalize()
             .multiplyScalar(strength);
-          particleSpeed.add(force);
+          if (push) {
+            particleSpeed.add(force);
+          } else {
+            particleSpeed.sub(force);
+          }
           particleSpeed.multiplyScalar(resistance);
           dParticles[i]     = particleSpeed.x;
           dParticles[i + 1] = particleSpeed.y;
