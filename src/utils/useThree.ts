@@ -1,10 +1,12 @@
 import React, { useEffect, useRef } from 'react';
 import * as THREE from 'three';
+import { Raycaster, Vector2 } from 'three';
 
 type ThreeScene = {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   renderer: THREE.WebGLRenderer;
+  mouseRay: THREE.Raycaster;
 }
 
 type Animate = (timeDiff: number) => void;
@@ -19,18 +21,28 @@ export function useThreeScene(init: InitThree): React.MutableRefObject<HTMLDivEl
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera( 75, window.innerWidth/window.innerHeight, 0.1, 1000 );
     const renderer = new THREE.WebGLRenderer();
+    const mouse = new Vector2();
+    const mouseRay = new Raycaster();
+
     const onResize = () => {
       camera.aspect = window.innerWidth/window.innerHeight;
       camera.updateProjectionMatrix();
       renderer.setSize( window.innerWidth, window.innerHeight );
     }
+    const onMouseMove = (e: MouseEvent) => {
+      const size = renderer.getSize(new Vector2());
+      mouse.x = ( e.clientX / size.x ) * 2 - 1;
+      mouse.y = - ( e.clientY / size.y ) * 2 + 1;
+      mouseRay.setFromCamera(mouse, camera);
+    }
     onResize();
     currentNode?.appendChild(renderer.domElement);
 
     window.addEventListener('resize', onResize);
+    renderer.domElement.addEventListener('mousemove', onMouseMove);
     camera.position.z = 500;
 
-    const animate = init({scene, camera, renderer});
+    const animate = init({ scene, camera, renderer, mouseRay });
 
     // Animate
     let stopAnimation = false;
@@ -54,6 +66,7 @@ export function useThreeScene(init: InitThree): React.MutableRefObject<HTMLDivEl
       stopAnimation = true;
       currentNode?.removeChild(renderer.domElement);
       window.removeEventListener('resize', onResize);
+      renderer.domElement.removeEventListener('mousemove', onMouseMove);
     };
   });
 

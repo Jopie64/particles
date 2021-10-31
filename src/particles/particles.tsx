@@ -1,10 +1,10 @@
 import React from 'react';
 import * as THREE from 'three';
-import { useThreeScene } from './useThree';
+import { useThreeScene } from '../utils/useThree';
 
 function Particles() {
 
-  const node = useThreeScene(({scene}) => {
+  const node = useThreeScene(({ scene, mouseRay }) => {
     // create the particle variables
     const particles: number[] = [];
     const dParticles: number[] = [];
@@ -13,8 +13,8 @@ function Particles() {
     const zAxis = new THREE.Vector3(0, 0, 1);
     const xAxis = new THREE.Vector3(1, 0, 0);
 
-    const particleCount = 100000;
-    const speed = .1;
+    const particleCount = 1000;
+    const speed = 0.1;
 
     for ( let i = 0; i < particleCount; i ++ ) {
 
@@ -35,7 +35,7 @@ function Particles() {
       // dp.applyAxisAngle(zAxis, perc * Math.PI * 40);
       // dp.applyAxisAngle(xAxis, perc * Math.PI * 2);
       dp.applyAxisAngle(zAxis, THREE.MathUtils.randFloatSpread(Math.PI * 2));
-      dp.applyAxisAngle(xAxis, THREE.MathUtils.randFloatSpread(Math.PI * 2));
+      // dp.applyAxisAngle(xAxis, THREE.MathUtils.randFloatSpread(Math.PI * 2));
 
       dParticles.push(dp.x, dp.y, dp.z);
 
@@ -57,7 +57,7 @@ function Particles() {
 
     // Me
     const me = (() => {
-      const geometry = new THREE.SphereGeometry(5, 32, 32);
+      const geometry = new THREE.SphereGeometry(1, 32, 32);
       const material = new THREE.MeshBasicMaterial( { color: 0xffffff } );
       const mesh = new THREE.Mesh( geometry, material );
       mesh.position.set(0, 0, 0);
@@ -74,10 +74,40 @@ function Particles() {
     // See for mouse position:
     // https://gist.github.com/whoisryosuke/99f23c9957d90e8cc3eb7689ffa5757c
 
+    const mousePlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+
     // Animate
     const bound = 500;
+    const mass = 1;
     return timeDiff => {
+
+      const mePos = mouseRay.ray.intersectPlane(mousePlane, me.mesh.position);
+
       const particleCount = particles.length;
+
+      if (mePos) {
+        const particlePos = new THREE.Vector3();
+        const particleDist = new THREE.Vector3();
+        const particleSpeed = new THREE.Vector3();
+        for (let i = 0; i < particleCount; i += 3) {
+          particlePos.set(particles[i], particles[i + 1], particles[i + 2]);
+          particleSpeed.set(dParticles[i], dParticles[i + 1], dParticles[i + 2]);
+          particleDist.subVectors(particlePos, mePos);
+          const dist = particleDist.lengthSq();
+          if (dist === 0) {
+            continue;
+          }
+          const strength = mass / dist;
+          const force = particleDist
+            .normalize()
+            .multiplyScalar(strength);
+          particleSpeed.add(force);
+          dParticles[i]     = particleSpeed.x;
+          dParticles[i + 1] = particleSpeed.y;
+          dParticles[i + 2] = particleSpeed.z;
+        }
+      }
+
       for (let i = 0; i < particleCount; i += 1) {
         if (particles[i] > bound && dParticles[i] > 0) {
           dParticles[i] = -dParticles[i];
