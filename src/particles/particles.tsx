@@ -98,6 +98,12 @@ function Particles() {
     addKeyHandler('-', multMass(0.75));
     let bounds = true;
     addKeyHandler('b', _ => bounds = !bounds);
+    const stop = () => {
+      for(let i = 0; i < dParticles.length; ++i) {
+        dParticles[i] = 0;
+      }
+    }
+    addKeyHandler('s', stop);
 
     const mousePlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
 
