@@ -96,6 +96,8 @@ function Particles() {
     addKeyHandler('=', multMass(1.5));
     addKeyHandler('+', multMass(1.5));
     addKeyHandler('-', multMass(0.75));
+    let bounds = true;
+    addKeyHandler('b', _ => bounds = !bounds);
 
     const mousePlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
 
@@ -137,11 +139,13 @@ function Particles() {
         }
       }
 
-      for (let i = 0; i < particleCount; i += 1) {
-        if (particles[i] > bound && dParticles[i] > 0) {
-          dParticles[i] = -dParticles[i];
-        } else if (particles[i] < -bound && dParticles[i] < 0) {
-          dParticles[i] = -dParticles[i];
+      if (bounds) {
+        for (let i = 0; i < particleCount; i += 1) {
+          if (particles[i] > bound && dParticles[i] > 0) {
+            dParticles[i] = -dParticles[i];
+          } else if (particles[i] < -bound && dParticles[i] < 0) {
+            dParticles[i] = -dParticles[i];
+          }
         }
       }
       for (let i = 0; i < particleCount; i += 1) {
