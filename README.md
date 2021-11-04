@@ -25,7 +25,7 @@ Your mouse is attracting or pushing the particles.
 | --- | -------- |
 | space | Toggle between push/pull |
 | r | Reset particles |
-| b | Toggle bounds. If enabled, particles are contained in a box |
+| b | Switch bound mode between bounce; center; no-bounds |
 | s | Stop all particles |
 | + or = | Increase mass of mouse |
 | - | Decrease mass of mouse |

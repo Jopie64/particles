@@ -49,7 +49,8 @@ function Particles() {
 
         dParticles.push(dp.x, dp.y, dp.z);
 
-        color.setHSL(perc, 1.0, 0.5);
+        // color.setHSL(perc, 1.0, 0.5);
+        color.setHSL(0, perc, 0.5);
         particleColors.push(color.r, color.g, color.b);
       }
       geometry.setAttribute( 'position', new THREE.Float32BufferAttribute( particles, 3 ) );
@@ -96,8 +97,8 @@ function Particles() {
     addKeyHandler('=', multMass(1.5));
     addKeyHandler('+', multMass(1.5));
     addKeyHandler('-', multMass(0.75));
-    let bounds = true;
-    addKeyHandler('b', _ => bounds = !bounds);
+    let boundMode = 1;
+    addKeyHandler('b', _ => boundMode = (boundMode + 1) % 3);
     const stop = () => {
       for(let i = 0; i < dParticles.length; ++i) {
         dParticles[i] = 0;
@@ -109,6 +110,8 @@ function Particles() {
 
     // Animate
     const bound = 500;
+    const isOutOfBound = (x: number) => x > bound || x < -bound;
+
     return timeDiff => {
 
       const mePos = mouseRay.ray.intersectPlane(mousePlane, me.mesh.position);
@@ -145,12 +148,21 @@ function Particles() {
         }
       }
 
-      if (bounds) {
+      if (boundMode === 1) {
         for (let i = 0; i < particleCount; i += 1) {
           if (particles[i] > bound && dParticles[i] > 0) {
             dParticles[i] = -dParticles[i];
           } else if (particles[i] < -bound && dParticles[i] < 0) {
             dParticles[i] = -dParticles[i];
+          }
+        }
+      }
+      if (boundMode === 2) {
+        for (let i = 0; i < particleCount; i += 3) {
+          if (isOutOfBound(particles[i]) || isOutOfBound(particles[i + 1]) || isOutOfBound(particles[i + 2])) {
+            particles[i]     = 0;
+            particles[i + 1] = 0;
+            particles[i + 2] = 0;
           }
         }
       }
