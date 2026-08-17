@@ -1,5 +1,6 @@
 import React, { useState, useRef, useCallback } from 'react';
 import * as THREE from 'three';
+import { GPUComputationRenderer, Variable } from 'three/examples/jsm/misc/GPUComputationRenderer.js';
 import { useKeyEvent } from '../utils/useEvent';
 import { useThreeScene } from '../utils/useThree';
 import './particles.css';
@@ -10,19 +11,136 @@ const BOUNDARY_MODES = [
   { label: 'Herstarten (Center)', desc: 'Reset buiten bereik', cssClass: 'respawn' }
 ];
 
+export interface Preset {
+  label: string;
+  value: number;
+  width: number;
+  height: number;
+  key: string;
+}
+
+const PARTICLE_PRESETS: Preset[] = [
+  { label: '500k', value: 524288, width: 1024, height: 512, key: '1' },
+  { label: '1M', value: 1048576, width: 1024, height: 1024, key: '2' },
+  { label: '2M', value: 2097152, width: 2048, height: 1024, key: '3' },
+  { label: '4M', value: 4194304, width: 2048, height: 2048, key: '4' },
+  { label: '8M', value: 8388608, width: 4096, height: 2048, key: '5' },
+  { label: '16M', value: 16777216, width: 4096, height: 4096, key: '6' }
+];
+
+const computeFragmentShaderPos = `
+  uniform float dt;
+  uniform int boundMode;
+  uniform float bound;
+
+  void main() {
+    vec2 uv = gl_FragCoord.xy / resolution.xy;
+    vec4 pos = texture2D( texturePosition, uv );
+    vec4 vel = texture2D( textureVelocity, uv );
+
+    pos.xyz += vel.xyz * dt;
+
+    if ( boundMode == 2 ) {
+      if ( abs( pos.x ) > bound || abs( pos.y ) > bound || abs( pos.z ) > bound ) {
+        pos.xyz = vec3( 0.0 );
+      }
+    }
+
+    gl_FragColor = pos;
+  }
+`;
+
+const computeFragmentShaderVel = `
+  uniform float dt;
+  uniform vec3 mousePos;
+  uniform bool hasMouse;
+  uniform float mass;
+  uniform bool isPush;
+  uniform int boundMode;
+  uniform float bound;
+  uniform float resistance;
+  uniform bool freeze;
+
+  void main() {
+    vec2 uv = gl_FragCoord.xy / resolution.xy;
+    vec4 pos = texture2D( texturePosition, uv );
+    vec4 vel = texture2D( textureVelocity, uv );
+
+    if ( freeze ) {
+      gl_FragColor = vec4( 0.0, 0.0, 0.0, 1.0 );
+      return;
+    }
+
+    vec3 p = pos.xyz;
+    vec3 v = vel.xyz;
+
+    if ( hasMouse ) {
+      vec3 diff = p - mousePos;
+      float distSq = dot( diff, diff );
+      if ( distSq > 0.001 ) {
+        float dist = sqrt( distSq );
+        float forceMag = ( isPush ? mass : -mass ) / ( distSq * dist );
+        v = ( v + diff * forceMag ) * resistance;
+      }
+    }
+
+    if ( boundMode == 1 ) { // Bounce
+      if ( ( p.x > bound && v.x > 0.0 ) || ( p.x < -bound && v.x < 0.0 ) ) v.x = -v.x;
+      if ( ( p.y > bound && v.y > 0.0 ) || ( p.y < -bound && v.y < 0.0 ) ) v.y = -v.y;
+      if ( ( p.z > bound && v.z > 0.0 ) || ( p.z < -bound && v.z < 0.0 ) ) v.z = -v.z;
+    }
+
+    gl_FragColor = vec4( v, 1.0 );
+  }
+`;
+
+const particleVertexShader = `
+  uniform sampler2D texturePosition;
+  attribute vec2 reference;
+  attribute vec3 color;
+  varying vec3 vColor;
+
+  void main() {
+    vColor = color;
+    vec4 pos = texture2D( texturePosition, reference );
+    gl_Position = projectionMatrix * modelViewMatrix * vec4( pos.xyz, 1.0 );
+    gl_PointSize = 1.0;
+  }
+`;
+
+const particleFragmentShader = `
+  varying vec3 vColor;
+  void main() {
+    gl_FragColor = vec4( vColor, 1.0 );
+  }
+`;
+
 function Particles() {
+  const [engine, setEngine] = useState<'gpu' | 'cpu'>('gpu');
   const [push, setPush] = useState(true);
   const [mass, setMass] = useState(1);
   const [boundMode, setBoundMode] = useState(1);
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [activePresetIdx, setActivePresetIdx] = useState(3); // Default 4M
+  const [fps, setFps] = useState(60);
+  const [simTime, setSimTime] = useState(0);
 
   // References for live 60fps loop access without re-renders
+  const engineRef = useRef<'gpu' | 'cpu'>('gpu');
   const pushRef = useRef(true);
   const massRef = useRef(1);
   const boundModeRef = useRef(1);
-  const resetFnRef = useRef<() => void>(() => {});
+  const activePresetIdxRef = useRef(3);
+  const resetFnRef = useRef<(presetIdx?: number, engine?: 'gpu' | 'cpu') => void>(() => {});
   const stopFnRef = useRef<() => void>(() => {});
   const multMassFnRef = useRef<(factor: number) => void>(() => {});
+
+  const toggleEngine = useCallback(() => {
+    const nextEngine = engineRef.current === 'gpu' ? 'cpu' : 'gpu';
+    engineRef.current = nextEngine;
+    setEngine(nextEngine);
+    resetFnRef.current(activePresetIdxRef.current, nextEngine);
+  }, []);
 
   const togglePush = useCallback(() => {
     pushRef.current = !pushRef.current;
@@ -38,6 +156,12 @@ function Particles() {
     setBoundMode(boundModeRef.current);
   }, []);
 
+  const handleSelectPreset = useCallback((presetIdx: number) => {
+    activePresetIdxRef.current = presetIdx;
+    setActivePresetIdx(presetIdx);
+    resetFnRef.current(presetIdx, engineRef.current);
+  }, []);
+
   const handleReset = useCallback(() => {
     resetFnRef.current();
   }, []);
@@ -50,6 +174,7 @@ function Particles() {
 
   // Register keyboard shortcuts
   addKeyHandler(' ', togglePush);
+  addKeyHandler('g', toggleEngine);
   addKeyHandler('r', handleReset);
   addKeyHandler('=', () => handleMultMass(1.5));
   addKeyHandler('+', () => handleMultMass(1.5));
@@ -58,47 +183,176 @@ function Particles() {
   addKeyHandler('s', handleStop);
   addKeyHandler('h', () => setIsCollapsed(prev => !prev));
 
-  const node = useThreeScene(({ scene, mouseRay }) => {
-    const particles: number[] = [];
-    const dParticles: number[] = [];
-    const particleColors: number[] = [];
+  // Particle count shortcuts 1-6
+  PARTICLE_PRESETS.forEach((preset, idx) => {
+    addKeyHandler(preset.key, () => handleSelectPreset(idx));
+  });
 
-    const speed = 0.1;
-    const geometry = new THREE.BufferGeometry();
+  const node = useThreeScene(({ scene, renderer, mouseRay }) => {
+    let currentPoints: THREE.Points | null = null;
+    let gpuCompute: GPUComputationRenderer | null = null;
+    let posVar: Variable | null = null;
+    let velVar: Variable | null = null;
+    let gpuMaterial: THREE.ShaderMaterial | null = null;
 
-    const reset = () => {
-      const color = new THREE.Color();
+    let cpuPositions = new Float32Array(0);
+    let cpuVelocities = new Float32Array(0);
+    let cpuPosAttr: THREE.BufferAttribute | null = null;
+
+    const reset = (presetIndex = activePresetIdxRef.current, currentEngine = engineRef.current) => {
+      activePresetIdxRef.current = presetIndex;
+      engineRef.current = currentEngine;
+      const preset = PARTICLE_PRESETS[presetIndex];
+      const count = preset.value;
+      const speed = 0.1;
       const zAxis = new THREE.Vector3(0, 0, 1);
-      const particleCount = 100000;
+      const dp = new THREE.Vector3();
+      const color = new THREE.Color();
 
-      particles.length = 0;
-      dParticles.length = 0;
-      particleColors.length = 0;
-
-      for (let i = 0; i < particleCount; i++) {
-        const perc = i / particleCount;
-        const x = 0;
-        const y = 0;
-        const z = 0;
-
-        particles.push(x, y, z);
-        const dp = new THREE.Vector3(((perc * 3 | 0) / 3 + 0.1) * speed, 0, 0);
-        dp.applyAxisAngle(zAxis, THREE.MathUtils.randFloatSpread(Math.PI * 2));
-        dParticles.push(dp.x, dp.y, dp.z);
-
-        color.setHSL(0, perc, 0.5);
-        particleColors.push(color.r, color.g, color.b);
+      // Clean up previous scene objects
+      if (currentPoints) {
+        scene.remove(currentPoints);
+        currentPoints.geometry.dispose();
+        if (Array.isArray(currentPoints.material)) {
+          currentPoints.material.forEach(m => m.dispose());
+        } else {
+          currentPoints.material.dispose();
+        }
+        currentPoints = null;
       }
-      geometry.setAttribute('position', new THREE.Float32BufferAttribute(particles, 3));
-      geometry.setAttribute('color', new THREE.Float32BufferAttribute(particleColors, 3));
+      if (gpuCompute) {
+        gpuCompute.dispose();
+        gpuCompute = null;
+      }
+
+      if (currentEngine === 'gpu') {
+        const texWidth = preset.width;
+        const texHeight = preset.height;
+        gpuCompute = new GPUComputationRenderer(texWidth, texHeight, renderer);
+
+        if (renderer.capabilities.isWebGL2 === false) {
+          gpuCompute.setDataType(THREE.HalfFloatType);
+        }
+
+        const pos0 = gpuCompute.createTexture();
+        const vel0 = gpuCompute.createTexture();
+        const posData = pos0.image.data;
+        const velData = vel0.image.data;
+        if (!posData || !velData) return;
+
+        const references = new Float32Array(count * 2);
+        const colors = new Float32Array(count * 3);
+
+        for (let i = 0; i < count; i++) {
+          const i4 = i * 4;
+          const i3 = i * 3;
+          const i2 = i * 2;
+          const perc = i / count;
+
+          posData[i4] = 0;
+          posData[i4 + 1] = 0;
+          posData[i4 + 2] = 0;
+          posData[i4 + 3] = 1;
+
+          dp.set(((perc * 3 | 0) / 3 + 0.1) * speed, 0, 0);
+          dp.applyAxisAngle(zAxis, THREE.MathUtils.randFloatSpread(Math.PI * 2));
+          velData[i4] = dp.x;
+          velData[i4 + 1] = dp.y;
+          velData[i4 + 2] = dp.z;
+          velData[i4 + 3] = 1;
+
+          const x = i % texWidth;
+          const y = Math.floor(i / texWidth);
+          references[i2] = (x + 0.5) / texWidth;
+          references[i2 + 1] = (y + 0.5) / texHeight;
+
+          color.setHSL(0, perc, 0.5);
+          colors[i3] = color.r;
+          colors[i3 + 1] = color.g;
+          colors[i3 + 2] = color.b;
+        }
+
+        posVar = gpuCompute.addVariable('texturePosition', computeFragmentShaderPos, pos0);
+        velVar = gpuCompute.addVariable('textureVelocity', computeFragmentShaderVel, vel0);
+
+        gpuCompute.setVariableDependencies(posVar, [posVar, velVar]);
+        gpuCompute.setVariableDependencies(velVar, [posVar, velVar]);
+
+        posVar.material.uniforms.dt = { value: 0 };
+        posVar.material.uniforms.boundMode = { value: 1 };
+        posVar.material.uniforms.bound = { value: 500 };
+
+        velVar.material.uniforms.dt = { value: 0 };
+        velVar.material.uniforms.mousePos = { value: new THREE.Vector3() };
+        velVar.material.uniforms.hasMouse = { value: false };
+        velVar.material.uniforms.mass = { value: 1 };
+        velVar.material.uniforms.isPush = { value: true };
+        velVar.material.uniforms.boundMode = { value: 1 };
+        velVar.material.uniforms.bound = { value: 500 };
+        velVar.material.uniforms.resistance = { value: 0.9999 };
+        velVar.material.uniforms.freeze = { value: false };
+
+        const error = gpuCompute.init();
+        if (error !== null) {
+          console.error('GPUComputationRenderer init error:', error);
+        }
+
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(count * 3), 3));
+        geometry.setAttribute('reference', new THREE.BufferAttribute(references, 2));
+        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+        gpuMaterial = new THREE.ShaderMaterial({
+          uniforms: {
+            texturePosition: { value: null }
+          },
+          vertexShader: particleVertexShader,
+          fragmentShader: particleFragmentShader
+        });
+
+        currentPoints = new THREE.Points(geometry, gpuMaterial);
+        currentPoints.frustumCulled = false;
+        scene.add(currentPoints);
+      } else {
+        // CPU Mode (Level 1 optimized)
+        cpuPositions = new Float32Array(count * 3);
+        cpuVelocities = new Float32Array(count * 3);
+        const colors = new Float32Array(count * 3);
+
+        for (let i = 0; i < count; i++) {
+          const i3 = i * 3;
+          const perc = i / count;
+
+          cpuPositions[i3] = 0;
+          cpuPositions[i3 + 1] = 0;
+          cpuPositions[i3 + 2] = 0;
+
+          dp.set(((perc * 3 | 0) / 3 + 0.1) * speed, 0, 0);
+          dp.applyAxisAngle(zAxis, THREE.MathUtils.randFloatSpread(Math.PI * 2));
+          cpuVelocities[i3] = dp.x;
+          cpuVelocities[i3 + 1] = dp.y;
+          cpuVelocities[i3 + 2] = dp.z;
+
+          color.setHSL(0, perc, 0.5);
+          colors[i3] = color.r;
+          colors[i3 + 1] = color.g;
+          colors[i3 + 2] = color.b;
+        }
+
+        const geometry = new THREE.BufferGeometry();
+        cpuPosAttr = new THREE.BufferAttribute(cpuPositions, 3);
+        cpuPosAttr.setUsage(THREE.DynamicDrawUsage);
+        geometry.setAttribute('position', cpuPosAttr);
+        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+        const cpuMaterial = new THREE.PointsMaterial({ size: 1, vertexColors: true });
+        currentPoints = new THREE.Points(geometry, cpuMaterial);
+        scene.add(currentPoints);
+      }
     };
 
-    resetFnRef.current = reset;
+    resetFnRef.current = (presetIdx?: number, eng?: 'gpu' | 'cpu') => reset(presetIdx, eng);
     reset();
-
-    const material = new THREE.PointsMaterial({ size: 1, vertexColors: true });
-    const points = new THREE.Points(geometry, material);
-    scene.add(points);
 
     // Player interaction sphere
     const createMe = (currentMass: number) => {
@@ -127,77 +381,130 @@ function Particles() {
     };
 
     stopFnRef.current = () => {
-      for (let i = 0; i < dParticles.length; ++i) {
-        dParticles[i] = 0;
+      if (engineRef.current === 'gpu') {
+        if (velVar) {
+          velVar.material.uniforms.freeze.value = true;
+        }
+      } else {
+        cpuVelocities.fill(0);
       }
     };
 
     const mousePlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
     const bound = 500;
-    const isOutOfBound = (x: number) => x > bound || x < -bound;
+
+    let frameCount = 0;
+    let lastFpsUpdate = performance.now();
+    let simTimeAccum = 0;
+    let simFrames = 0;
 
     return timeDiff => {
+      frameCount++;
+      const t0 = performance.now();
+
+      const dt = Math.min(timeDiff, 100);
       const mePos = mouseRay.ray.intersectPlane(mousePlane, me.mesh.position);
-      const particleCount = particles.length;
-      const resistance = Math.pow(0.9999, timeDiff);
-
-      if (mePos) {
-        const particlePos = new THREE.Vector3();
-        const particleDist = new THREE.Vector3();
-        const particleSpeed = new THREE.Vector3();
-        const currentMass = massRef.current;
-        const isPush = pushRef.current;
-
-        for (let i = 0; i < particleCount; i += 3) {
-          particlePos.set(particles[i], particles[i + 1], particles[i + 2]);
-          particleSpeed.set(dParticles[i], dParticles[i + 1], dParticles[i + 2]);
-          particleDist.subVectors(particlePos, mePos);
-          const dist = particleDist.lengthSq();
-          if (dist === 0) {
-            continue;
-          }
-          const strength = currentMass / dist;
-          const force = particleDist.normalize().multiplyScalar(strength);
-          if (isPush) {
-            particleSpeed.add(force);
-          } else {
-            particleSpeed.sub(force);
-          }
-          particleSpeed.multiplyScalar(resistance);
-          dParticles[i] = particleSpeed.x;
-          dParticles[i + 1] = particleSpeed.y;
-          dParticles[i + 2] = particleSpeed.z;
-        }
-      }
-
+      const hasMouse = mePos !== null;
+      const currentMass = massRef.current;
+      const isPush = pushRef.current;
       const currentBoundMode = boundModeRef.current;
+      const resistance = Math.pow(0.9999, dt);
 
-      if (currentBoundMode === 1) {
-        for (let i = 0; i < particleCount; i += 1) {
-          if (particles[i] > bound && dParticles[i] > 0) {
-            dParticles[i] = -dParticles[i];
-          } else if (particles[i] < -bound && dParticles[i] < 0) {
-            dParticles[i] = -dParticles[i];
-          }
+      if (engineRef.current === 'gpu' && gpuCompute && posVar && velVar && gpuMaterial) {
+        posVar.material.uniforms.dt.value = dt;
+        posVar.material.uniforms.boundMode.value = currentBoundMode;
+        posVar.material.uniforms.bound.value = bound;
+
+        velVar.material.uniforms.dt.value = dt;
+        velVar.material.uniforms.hasMouse.value = hasMouse;
+        if (hasMouse && mePos) {
+          velVar.material.uniforms.mousePos.value.copy(mePos);
         }
-      }
-      if (currentBoundMode === 2) {
-        for (let i = 0; i < particleCount; i += 3) {
-          if (isOutOfBound(particles[i]) || isOutOfBound(particles[i + 1]) || isOutOfBound(particles[i + 2])) {
-            particles[i] = 0;
-            particles[i + 1] = 0;
-            particles[i + 2] = 0;
-          }
+        velVar.material.uniforms.mass.value = currentMass;
+        velVar.material.uniforms.isPush.value = isPush;
+        velVar.material.uniforms.boundMode.value = currentBoundMode;
+        velVar.material.uniforms.bound.value = bound;
+        velVar.material.uniforms.resistance.value = resistance;
+
+        gpuCompute.compute();
+
+        if (velVar.material.uniforms.freeze.value) {
+          velVar.material.uniforms.freeze.value = false;
         }
+
+        gpuMaterial.uniforms.texturePosition.value = gpuCompute.getCurrentRenderTarget(posVar).texture;
+      } else if (cpuPosAttr) {
+        // CPU loop
+        const mx = hasMouse && mePos ? mePos.x : 0;
+        const my = hasMouse && mePos ? mePos.y : 0;
+        const mz = hasMouse && mePos ? mePos.z : 0;
+        const massFactor = isPush ? currentMass : -currentMass;
+        const totalCoords = cpuPositions.length;
+
+        for (let i = 0; i < totalCoords; i += 3) {
+          let px = cpuPositions[i];
+          let py = cpuPositions[i + 1];
+          let pz = cpuPositions[i + 2];
+          let vx = cpuVelocities[i];
+          let vy = cpuVelocities[i + 1];
+          let vz = cpuVelocities[i + 2];
+
+          if (hasMouse) {
+            const dx = px - mx;
+            const dy = py - my;
+            const dz = pz - mz;
+            const distSq = dx * dx + dy * dy + dz * dz;
+
+            if (distSq > 0.001) {
+              const dist = Math.sqrt(distSq);
+              const forceMag = massFactor / (distSq * dist);
+              vx = (vx + dx * forceMag) * resistance;
+              vy = (vy + dy * forceMag) * resistance;
+              vz = (vz + dz * forceMag) * resistance;
+            }
+          }
+
+          if (currentBoundMode === 1) { // Bounce
+            if ((px > bound && vx > 0) || (px < -bound && vx < 0)) vx = -vx;
+            if ((py > bound && vy > 0) || (py < -bound && vy < 0)) vy = -vy;
+            if ((pz > bound && vz > 0) || (pz < -bound && vz < 0)) vz = -vz;
+          } else if (currentBoundMode === 2) { // Respawn / Center
+            if (px > bound || px < -bound || py > bound || py < -bound || pz > bound || pz < -bound) {
+              px = 0; py = 0; pz = 0;
+            }
+          }
+
+          cpuPositions[i] = px + vx * dt;
+          cpuPositions[i + 1] = py + vy * dt;
+          cpuPositions[i + 2] = pz + vz * dt;
+          cpuVelocities[i] = vx;
+          cpuVelocities[i + 1] = vy;
+          cpuVelocities[i + 2] = vz;
+        }
+
+        cpuPosAttr.needsUpdate = true;
       }
-      for (let i = 0; i < particleCount; i += 1) {
-        particles[i] += dParticles[i] * timeDiff;
+
+      const t1 = performance.now();
+      simTimeAccum += (t1 - t0);
+      simFrames++;
+
+      const now = performance.now();
+      if (now - lastFpsUpdate >= 500) {
+        const measuredFps = Math.round((frameCount * 1000) / (now - lastFpsUpdate));
+        const avgSimTime = Number((simTimeAccum / simFrames).toFixed(2));
+        setFps(measuredFps);
+        setSimTime(avgSimTime);
+        frameCount = 0;
+        simTimeAccum = 0;
+        simFrames = 0;
+        lastFpsUpdate = now;
       }
-      geometry.setAttribute('position', new THREE.Float32BufferAttribute(particles, 3));
     };
   });
 
   const activeBound = BOUNDARY_MODES[boundMode];
+  const currentPreset = PARTICLE_PRESETS[activePresetIdx];
 
   return (
     <div className="particles-container">
@@ -206,7 +513,15 @@ function Particles() {
         <div className="particles-hud-header" onClick={() => setIsCollapsed(prev => !prev)}>
           <div className="particles-hud-title">
             <span>✨ 3D Particles</span>
-            <span className="particles-hud-badge">100k deeltjes</span>
+            <span className="particles-hud-badge">
+              {currentPreset.label} deeltjes
+            </span>
+            <span className={`particles-engine-badge ${engine}`}>
+              {engine === 'gpu' ? '🚀 GPU' : '⚡ CPU'}
+            </span>
+            <span className={`particles-fps-badge ${fps >= 55 ? 'fps-good' : fps >= 30 ? 'fps-warning' : 'fps-bad'}`}>
+              {fps} FPS
+            </span>
           </div>
           <button
             className="particles-hud-toggle"
@@ -219,8 +534,74 @@ function Particles() {
 
         {!isCollapsed && (
           <div className="particles-hud-body">
+            {/* Engine Switcher */}
+            <div className="engine-switcher-section">
+              <span className="section-label">Engine (G)</span>
+              <div className="engine-switcher-buttons">
+                <button
+                  type="button"
+                  className={`engine-toggle-btn ${engine === 'gpu' ? 'active gpu' : ''}`}
+                  onClick={toggleEngine}
+                >
+                  🚀 GPU (GPGPU Shaders)
+                </button>
+                <button
+                  type="button"
+                  className={`engine-toggle-btn ${engine === 'cpu' ? 'active cpu' : ''}`}
+                  onClick={toggleEngine}
+                >
+                  ⚡ CPU (Level 1)
+                </button>
+              </div>
+            </div>
+
+            {/* Particle Count Preset Selector */}
+            <div className="particles-count-section">
+              <div className="particles-section-header">
+                <span className="section-label">Aantal Deeltjes (1-6)</span>
+                <span className="section-val">{currentPreset.value.toLocaleString('nl-NL')}</span>
+              </div>
+              <div className="particles-preset-group">
+                {PARTICLE_PRESETS.map((preset, idx) => (
+                  <button
+                    key={preset.value}
+                    type="button"
+                    className={`preset-btn ${activePresetIdx === idx ? 'active' : ''}`}
+                    onClick={() => handleSelectPreset(idx)}
+                    title={`${preset.value.toLocaleString('nl-NL')} deeltjes (Toets ${preset.key})`}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {/* Live Status Indicators */}
             <div className="particles-status-grid">
+              <div className="status-pill" onClick={toggleEngine} style={{ cursor: 'pointer' }} title="Klik om engine te wisselen">
+                <span className="status-pill-label">Engine (G)</span>
+                <span className="status-pill-val">
+                  <span className={`status-indicator ${engine === 'gpu' ? 'fps-good' : 'respawn'}`}></span>
+                  {engine === 'gpu' ? '🚀 GPU Shaders' : '⚡ CPU L1'}
+                </span>
+              </div>
+
+              <div className="status-pill">
+                <span className="status-pill-label">Framerate</span>
+                <span className="status-pill-val">
+                  <span className={`status-indicator ${fps >= 55 ? 'fps-good' : fps >= 30 ? 'fps-warning' : 'fps-bad'}`}></span>
+                  {fps} FPS
+                </span>
+              </div>
+
+              <div className="status-pill">
+                <span className="status-pill-label">Rekentijd / Dispatch</span>
+                <span className="status-pill-val">
+                  <span className={`status-indicator ${simTime < 5 ? 'fps-good' : simTime < 16.6 ? 'fps-warning' : 'fps-bad'}`}></span>
+                  ⏱️ {simTime}ms <span className="frame-time-text">/ 16.6ms</span>
+                </span>
+              </div>
+
               <div className="status-pill" onClick={togglePush} style={{ cursor: 'pointer' }} title="Klik om te wisselen">
                 <span className="status-pill-label">Interactie (Spatie)</span>
                 <span className="status-pill-val">
@@ -243,15 +624,18 @@ function Particles() {
                   {activeBound.label}
                 </span>
               </div>
-
-              <div className="status-pill" onClick={handleReset} style={{ cursor: 'pointer' }} title="Klik om te resetten">
-                <span className="status-pill-label">Reset (R)</span>
-                <span className="status-pill-val">🔄 Herstart</span>
-              </div>
             </div>
 
             {/* Keyboard Shortcuts Legend Table */}
             <div className="particles-legend-table">
+              <div className="legend-row">
+                <div className="legend-keys"><span className="key-badge">G</span></div>
+                <div className="legend-action">Wissel Engine (GPU / CPU)</div>
+              </div>
+              <div className="legend-row">
+                <div className="legend-keys"><span className="key-badge">1</span>..<span className="key-badge">6</span></div>
+                <div className="legend-action">Kies aantal deeltjes (500k..16M)</div>
+              </div>
               <div className="legend-row">
                 <div className="legend-keys"><span className="key-badge">Spatie</span></div>
                 <div className="legend-action">Wissel afstoten / aantrekken</div>
@@ -275,10 +659,6 @@ function Particles() {
               <div className="legend-row">
                 <div className="legend-keys"><span className="key-badge">H</span></div>
                 <div className="legend-action">Legenda in-/uitklappen</div>
-              </div>
-              <div className="legend-row">
-                <div className="legend-keys"><span className="key-badge">Muis</span></div>
-                <div className="legend-action">Beweeg zwaartekrachtbol</div>
               </div>
             </div>
 
