@@ -12,7 +12,7 @@ type ThreeScene = {
 type Animate = (timeDiff: number) => void;
 type InitThree = (scene: ThreeScene) => Animate;
 
-export function useThreeScene(init: InitThree): React.MutableRefObject<HTMLDivElement | null> {
+export function useThreeScene(init: InitThree): React.RefObject<HTMLDivElement | null> {
   const threeNode = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
