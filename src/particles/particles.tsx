@@ -253,12 +253,17 @@ function Particles() {
         gpuCompute = null;
       }
 
-      if (currentEngine === 'gpu') {
+      let activeEngine = currentEngine;
+      if (activeEngine === 'gpu' && (!renderer?.capabilities || !renderer.capabilities.maxVertexTextures)) {
+        activeEngine = 'cpu';
+      }
+
+      if (activeEngine === 'gpu') {
         const texWidth = preset.width;
         const texHeight = preset.height;
         gpuCompute = new GPUComputationRenderer(texWidth, texHeight, renderer);
 
-        if (renderer.capabilities.isWebGL2 === false) {
+        if (renderer?.capabilities && renderer.capabilities.isWebGL2 === false) {
           gpuCompute.setDataType(THREE.HalfFloatType);
         }
 
