@@ -59,6 +59,7 @@ const computeFragmentShaderVel = `
   uniform int boundMode;
   uniform float bound;
   uniform float resistance;
+  uniform float softeningSq;
   uniform bool freeze;
 
   void main() {
@@ -76,7 +77,7 @@ const computeFragmentShaderVel = `
 
     if ( hasMouse ) {
       vec3 diff = p - mousePos;
-      float distSq = dot( diff, diff );
+      float distSq = dot( diff, diff ) + softeningSq;
       if ( distSq > 0.001 ) {
         float dist = sqrt( distSq );
         float forceMag = ( isPush ? mass : -mass ) / ( distSq * dist );
@@ -117,6 +118,7 @@ const particleFragmentShader = `
 
 function Particles() {
   const [engine, setEngine] = useState<'gpu' | 'cpu'>('gpu');
+  const [gravityMode, setGravityMode] = useState<'orbit' | 'slingshot'>('orbit');
   const [push, setPush] = useState(true);
   const [mass, setMass] = useState(1);
   const [boundMode, setBoundMode] = useState(1);
@@ -127,6 +129,7 @@ function Particles() {
 
   // References for live 60fps loop access without re-renders
   const engineRef = useRef<'gpu' | 'cpu'>('gpu');
+  const gravityModeRef = useRef<'orbit' | 'slingshot'>('orbit');
   const pushRef = useRef(true);
   const massRef = useRef(1);
   const boundModeRef = useRef(1);
@@ -140,6 +143,12 @@ function Particles() {
     engineRef.current = nextEngine;
     setEngine(nextEngine);
     resetFnRef.current(activePresetIdxRef.current, nextEngine);
+  }, []);
+
+  const toggleGravityMode = useCallback(() => {
+    const nextMode = gravityModeRef.current === 'orbit' ? 'slingshot' : 'orbit';
+    gravityModeRef.current = nextMode;
+    setGravityMode(nextMode);
   }, []);
 
   const togglePush = useCallback(() => {
@@ -175,6 +184,7 @@ function Particles() {
   // Register keyboard shortcuts
   addKeyHandler(' ', togglePush);
   addKeyHandler('g', toggleEngine);
+  addKeyHandler('o', toggleGravityMode);
   addKeyHandler('r', handleReset);
   addKeyHandler('=', () => handleMultMass(1.5));
   addKeyHandler('+', () => handleMultMass(1.5));
@@ -290,6 +300,7 @@ function Particles() {
         velVar.material.uniforms.boundMode = { value: 1 };
         velVar.material.uniforms.bound = { value: 500 };
         velVar.material.uniforms.resistance = { value: 0.9999 };
+        velVar.material.uniforms.softeningSq = { value: 625.0 };
         velVar.material.uniforms.freeze = { value: false };
 
         const error = gpuCompute.init();
@@ -409,6 +420,7 @@ function Particles() {
       const isPush = pushRef.current;
       const currentBoundMode = boundModeRef.current;
       const resistance = Math.pow(0.9999, dt);
+      const softeningSq = gravityModeRef.current === 'orbit' ? 625.0 : 0.25;
 
       if (engineRef.current === 'gpu' && gpuCompute && posVar && velVar && gpuMaterial) {
         posVar.material.uniforms.dt.value = dt;
@@ -425,6 +437,7 @@ function Particles() {
         velVar.material.uniforms.boundMode.value = currentBoundMode;
         velVar.material.uniforms.bound.value = bound;
         velVar.material.uniforms.resistance.value = resistance;
+        velVar.material.uniforms.softeningSq.value = softeningSq;
 
         gpuCompute.compute();
 
@@ -453,7 +466,7 @@ function Particles() {
             const dx = px - mx;
             const dy = py - my;
             const dz = pz - mz;
-            const distSq = dx * dx + dy * dy + dz * dz;
+            const distSq = dx * dx + dy * dy + dz * dz + softeningSq;
 
             if (distSq > 0.001) {
               const dist = Math.sqrt(distSq);
@@ -586,6 +599,14 @@ function Particles() {
                 </span>
               </div>
 
+              <div className="status-pill" onClick={toggleGravityMode} style={{ cursor: 'pointer' }} title="Klik om zwaartekrachtmodus te wisselen">
+                <span className="status-pill-label">Zwaartekracht (O)</span>
+                <span className="status-pill-val">
+                  <span className={`status-indicator ${gravityMode === 'orbit' ? 'fps-good' : 'respawn'}`}></span>
+                  {gravityMode === 'orbit' ? '🌀 Orbit (Soft)' : '🚀 Slingshot (Punt)'}
+                </span>
+              </div>
+
               <div className="status-pill">
                 <span className="status-pill-label">Framerate</span>
                 <span className="status-pill-val">
@@ -624,6 +645,11 @@ function Particles() {
                   {activeBound.label}
                 </span>
               </div>
+
+              <div className="status-pill" onClick={handleReset} style={{ cursor: 'pointer' }} title="Klik om te resetten">
+                <span className="status-pill-label">Reset (R)</span>
+                <span className="status-pill-val">🔄 Herstart</span>
+              </div>
             </div>
 
             {/* Keyboard Shortcuts Legend Table */}
@@ -631,6 +657,10 @@ function Particles() {
               <div className="legend-row">
                 <div className="legend-keys"><span className="key-badge">G</span></div>
                 <div className="legend-action">Wissel Engine (GPU / CPU)</div>
+              </div>
+              <div className="legend-row">
+                <div className="legend-keys"><span className="key-badge">O</span></div>
+                <div className="legend-action">Wissel Zwaartekracht (Orbit / Slingshot)</div>
               </div>
               <div className="legend-row">
                 <div className="legend-keys"><span className="key-badge">1</span>..<span className="key-badge">6</span></div>
