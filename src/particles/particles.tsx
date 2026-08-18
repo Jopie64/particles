@@ -116,9 +116,27 @@ const particleFragmentShader = `
   }
 `;
 
+export interface GravityModeConfig {
+  id: string;
+  label: string;
+  name: string;
+  softening: number;
+  softeningSq: number;
+  damping: number;
+  colorClass: string;
+}
+
+const GRAVITY_MODES: GravityModeConfig[] = [
+  { id: 'slingshot', label: '🚀 Slingshot', name: 'Puntmassa (ε=2)', softening: 2, softeningSq: 4, damping: 0.9999, colorClass: 'pull' },
+  { id: 'dynamic', label: '⚡ Dynamic', name: 'Licht (ε=40)', softening: 40, softeningSq: 1600, damping: 0.9998, colorClass: 'respawn' },
+  { id: 'orbit', label: '🌀 Orbit', name: 'Stabiel (ε=100)', softening: 100, softeningSq: 10000, damping: 0.9995, colorClass: 'fps-good' },
+  { id: 'galaxy', label: '🌌 Galaxy', name: 'Draaikolk (ε=200)', softening: 200, softeningSq: 40000, damping: 0.9990, colorClass: 'bounce' },
+  { id: 'nebula', label: '🪐 Nebula', name: 'Zachte kern (ε=350)', softening: 350, softeningSq: 122500, damping: 0.9980, colorClass: 'none' },
+];
+
 function Particles() {
   const [engine, setEngine] = useState<'gpu' | 'cpu'>('gpu');
-  const [gravityMode, setGravityMode] = useState<'orbit' | 'slingshot'>('orbit');
+  const [gravityIdx, setGravityIdx] = useState(2); // Default Orbit (ε=100)
   const [push, setPush] = useState(true);
   const [mass, setMass] = useState(1);
   const [boundMode, setBoundMode] = useState(1);
@@ -129,7 +147,7 @@ function Particles() {
 
   // References for live 60fps loop access without re-renders
   const engineRef = useRef<'gpu' | 'cpu'>('gpu');
-  const gravityModeRef = useRef<'orbit' | 'slingshot'>('orbit');
+  const gravityIdxRef = useRef(2);
   const pushRef = useRef(true);
   const massRef = useRef(1);
   const boundModeRef = useRef(1);
@@ -145,10 +163,10 @@ function Particles() {
     resetFnRef.current(activePresetIdxRef.current, nextEngine);
   }, []);
 
-  const toggleGravityMode = useCallback(() => {
-    const nextMode = gravityModeRef.current === 'orbit' ? 'slingshot' : 'orbit';
-    gravityModeRef.current = nextMode;
-    setGravityMode(nextMode);
+  const cycleGravityMode = useCallback(() => {
+    const nextIdx = (gravityIdxRef.current + 1) % GRAVITY_MODES.length;
+    gravityIdxRef.current = nextIdx;
+    setGravityIdx(nextIdx);
   }, []);
 
   const togglePush = useCallback(() => {
@@ -184,7 +202,7 @@ function Particles() {
   // Register keyboard shortcuts
   addKeyHandler(' ', togglePush);
   addKeyHandler('g', toggleEngine);
-  addKeyHandler('o', toggleGravityMode);
+  addKeyHandler('o', cycleGravityMode);
   addKeyHandler('r', handleReset);
   addKeyHandler('=', () => handleMultMass(1.5));
   addKeyHandler('+', () => handleMultMass(1.5));
@@ -419,8 +437,9 @@ function Particles() {
       const currentMass = massRef.current;
       const isPush = pushRef.current;
       const currentBoundMode = boundModeRef.current;
-      const resistance = Math.pow(0.9999, dt);
-      const softeningSq = gravityModeRef.current === 'orbit' ? 625.0 : 0.25;
+      const currentGravity = GRAVITY_MODES[gravityIdxRef.current];
+      const resistance = Math.pow(currentGravity.damping, dt);
+      const softeningSq = currentGravity.softeningSq;
 
       if (engineRef.current === 'gpu' && gpuCompute && posVar && velVar && gpuMaterial) {
         posVar.material.uniforms.dt.value = dt;
@@ -518,6 +537,7 @@ function Particles() {
 
   const activeBound = BOUNDARY_MODES[boundMode];
   const currentPreset = PARTICLE_PRESETS[activePresetIdx];
+  const currentGravity = GRAVITY_MODES[gravityIdx];
 
   return (
     <div className="particles-container">
@@ -599,11 +619,11 @@ function Particles() {
                 </span>
               </div>
 
-              <div className="status-pill" onClick={toggleGravityMode} style={{ cursor: 'pointer' }} title="Klik om zwaartekrachtmodus te wisselen">
+              <div className="status-pill" onClick={cycleGravityMode} style={{ cursor: 'pointer' }} title="Klik om zwaartekrachtmodus te wisselen (O)">
                 <span className="status-pill-label">Zwaartekracht (O)</span>
                 <span className="status-pill-val">
-                  <span className={`status-indicator ${gravityMode === 'orbit' ? 'fps-good' : 'respawn'}`}></span>
-                  {gravityMode === 'orbit' ? '🌀 Orbit (Soft)' : '🚀 Slingshot (Punt)'}
+                  <span className={`status-indicator ${currentGravity.colorClass}`}></span>
+                  {currentGravity.label} <span className="frame-time-text">ε={currentGravity.softening}</span>
                 </span>
               </div>
 
@@ -660,7 +680,7 @@ function Particles() {
               </div>
               <div className="legend-row">
                 <div className="legend-keys"><span className="key-badge">O</span></div>
-                <div className="legend-action">Wissel Zwaartekracht (Orbit / Slingshot)</div>
+                <div className="legend-action">Wissel Zwaartekracht (Slingshot/Dyn/Orbit/Galaxy/Nebula)</div>
               </div>
               <div className="legend-row">
                 <div className="legend-keys"><span className="key-badge">1</span>..<span className="key-badge">6</span></div>
